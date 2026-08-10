@@ -285,6 +285,12 @@ unsafe fn build_classes() {
             );
 
             decl.add_method(
+                sel!(_opaqueRectForWindowMoveWhenInTitlebar),
+                opaque_rect_for_window_move_when_in_titlebar
+                    as extern "C" fn(&Object, Sel) -> NSRect,
+            );
+
+            decl.add_method(
                 sel!(characterIndexForPoint:),
                 character_index_for_point as extern "C" fn(&Object, Sel, NSPoint) -> u64,
             );
@@ -492,6 +498,7 @@ struct MacWindowState {
     external_files_dragged: bool,
     // Whether the next left-mouse click is also the focusing click.
     first_mouse: bool,
+    app_owns_titlebar_drag: bool,
     fullscreen_restore_bounds: Bounds<Pixels>,
     move_tab_to_new_window_callback: Option<Box<dyn FnMut()>>,
     merge_all_windows_callback: Option<Box<dyn FnMut()>>,
@@ -664,6 +671,7 @@ impl MacWindow {
             titlebar,
             kind,
             is_movable,
+            app_owns_titlebar_drag,
             is_resizable,
             is_minimizable,
             focus,
@@ -822,6 +830,7 @@ impl MacWindow {
                 do_command_handled: None,
                 external_files_dragged: false,
                 first_mouse: false,
+                app_owns_titlebar_drag,
                 fullscreen_restore_bounds: Bounds::default(),
                 move_tab_to_new_window_callback: None,
                 merge_all_windows_callback: None,
@@ -2739,6 +2748,18 @@ extern "C" fn accepts_first_mouse(this: &Object, _: Sel, _: id) -> BOOL {
     let mut lock = window_state.as_ref().lock();
     lock.first_mouse = true;
     YES
+}
+
+extern "C" fn opaque_rect_for_window_move_when_in_titlebar(this: &Object, _: Sel) -> NSRect {
+    let zero_rect = NSRect::new(NSPoint::new(0., 0.), NSSize::new(0., 0.));
+    let window_state = unsafe { get_window_state(this) };
+    let app_owns_titlebar_drag = window_state.as_ref().lock().app_owns_titlebar_drag;
+
+    if app_owns_titlebar_drag {
+        unsafe { msg_send![this, bounds] }
+    } else {
+        zero_rect
+    }
 }
 
 extern "C" fn character_index_for_point(this: &Object, _: Sel, position: NSPoint) -> u64 {

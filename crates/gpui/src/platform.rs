@@ -30,11 +30,12 @@ pub(crate) type PlatformScreenCaptureFrame = core_video::image_buffer::CVImageBu
 
 use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
-    DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, Font, FontId, FontMetrics, FontRun,
-    ForegroundExecutor, GlyphId, GpuSpecs, Hsla, ImageSource, Keymap, LineLayout, Pixels,
-    PlatformInput, Point, Priority, RenderGlyphParams, RenderImage, RenderImageParams,
-    RenderSvgParams, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
-    SystemWindowTab, Task, ThreadTaskTimings, Window, WindowControlArea, hash, point, px, size,
+    DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, DynamicTextureParams, Font, FontId,
+    FontMetrics, FontRun, ForegroundExecutor, GlyphId, GpuSpecs, Hsla, ImageSource, Keymap,
+    LineLayout, Pixels, PlatformInput, Point, Priority, RenderGlyphParams, RenderImage,
+    RenderImageParams, RenderSvgParams, Scene, ShapedGlyph, ShapedRun, SharedString, Size,
+    SvgRenderer, SystemWindowTab, Task, ThreadTaskTimings, Window, WindowControlArea, hash, point,
+    px, size,
 };
 use anyhow::Result;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -1057,6 +1058,7 @@ pub enum AtlasKey {
     Glyph(RenderGlyphParams),
     Svg(RenderSvgParams),
     Image(RenderImageParams),
+    DynamicTexture(DynamicTextureParams),
 }
 
 impl AtlasKey {
@@ -1081,6 +1083,7 @@ impl AtlasKey {
             }
             AtlasKey::Svg(_) => AtlasTextureKind::Monochrome,
             AtlasKey::Image(_) => AtlasTextureKind::Polychrome,
+            AtlasKey::DynamicTexture(_) => AtlasTextureKind::Polychrome,
         }
     }
 }
@@ -1103,14 +1106,47 @@ impl From<RenderImageParams> for AtlasKey {
     }
 }
 
+impl From<DynamicTextureParams> for AtlasKey {
+    fn from(params: DynamicTextureParams) -> Self {
+        Self::DynamicTexture(params)
+    }
+}
+
 #[expect(missing_docs)]
 pub trait PlatformAtlas {
+    /// The returned bytes must be consumed or copied before this method returns.
     fn get_or_insert_with<'a>(
         &self,
         key: &AtlasKey,
         build: &mut dyn FnMut() -> Result<Option<(Size<DevicePixels>, Cow<'a, [u8]>)>>,
     ) -> Result<Option<AtlasTile>>;
+
+    /// Updates a device-pixel region relative to the top-left of an existing atlas entry.
+    fn update(&self, _key: &AtlasKey, _bounds: Bounds<DevicePixels>, _bytes: &[u8]) -> Result<()> {
+        anyhow::bail!("dynamic texture updates are not supported by this platform atlas")
+    }
+
+    /// Returns the generation of GPU resources backing this atlas.
+    fn resource_generation(&self) -> u64 {
+        0
+    }
+
     fn remove(&self, key: &AtlasKey);
+}
+
+#[cfg(test)]
+mod dynamic_texture_tests {
+    use super::*;
+    use crate::{DynamicTextureId, DynamicTextureParams};
+
+    #[test]
+    fn dynamic_texture_keys_use_the_polychrome_atlas() {
+        let key = AtlasKey::DynamicTexture(DynamicTextureParams {
+            texture_id: DynamicTextureId(7),
+        });
+
+        assert_eq!(key.texture_kind(), AtlasTextureKind::Polychrome);
+    }
 }
 
 #[doc(hidden)]
@@ -1502,6 +1538,12 @@ pub struct WindowOptions {
     /// Whether the window should be movable by the user
     pub is_movable: bool,
 
+    /// Whether the application owns dragging of the custom titlebar rather than AppKit.
+    ///
+    /// This only has an effect on macOS. Set it to `true` for windows that draw their
+    /// own titlebar and move the window through [`Window::start_window_move`].
+    pub app_owns_titlebar_drag: bool,
+
     /// Whether the window should be resizable by the user
     pub is_resizable: bool,
 
@@ -1556,6 +1598,13 @@ pub struct WindowParams {
     /// Whether the window should be movable by the user
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
     pub is_movable: bool,
+
+    /// Whether the application owns dragging of the custom titlebar (macOS only)
+    #[cfg_attr(
+        any(target_os = "linux", target_os = "freebsd", target_os = "windows"),
+        allow(dead_code)
+    )]
+    pub app_owns_titlebar_drag: bool,
 
     /// Whether the window should be resizable by the user
     #[cfg_attr(any(target_os = "linux", target_os = "freebsd"), allow(dead_code))]
@@ -1634,6 +1683,7 @@ impl Default for WindowOptions {
             show: true,
             kind: WindowKind::Normal,
             is_movable: true,
+            app_owns_titlebar_drag: false,
             is_resizable: true,
             is_minimizable: true,
             display_id: None,

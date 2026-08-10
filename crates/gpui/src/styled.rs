@@ -276,6 +276,12 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Sets the flex grow factor for this element.
+    fn flex_grow_factor(mut self, factor: f32) -> Self {
+        self.style().flex_grow = Some(factor);
+        self
+    }
+
     /// Sets the element to prevent a flex item from growing.
     /// [Docs](https://tailwindcss.com/docs/flex-grow#dont-grow)
     fn flex_grow_0(mut self) -> Self {
@@ -287,6 +293,12 @@ pub trait Styled: Sized {
     /// [Docs](https://tailwindcss.com/docs/flex-shrink)
     fn flex_shrink(mut self) -> Self {
         self.style().flex_shrink = Some(1.);
+        self
+    }
+
+    /// Sets the flex shrink factor for this element.
+    fn flex_shrink_factor(mut self, factor: f32) -> Self {
+        self.style().flex_shrink = Some(factor);
         self
     }
 

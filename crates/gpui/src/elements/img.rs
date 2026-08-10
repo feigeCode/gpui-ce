@@ -622,7 +622,7 @@ impl Asset for ImageAssetLoader {
                     use anyhow::Context as _;
 
                     let response = client
-                        .get(uri.as_ref(), true)
+                        .get_bytes(uri.as_ref(), true)
                         .await
                         .with_context(|| format!("loading image asset from {uri:?}"))?;
                     if !response.status.is_success() {

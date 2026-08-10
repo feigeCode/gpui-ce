@@ -1,5 +1,6 @@
 use anyhow::anyhow;
-use gpui::http_client::{HttpClient, HttpResponse};
+use futures::{AsyncReadExt as _, future::BoxFuture};
+use gpui::http_client::{AsyncBody, HttpClient, RedirectPolicy, Request, Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Poll;
@@ -49,24 +50,57 @@ impl<F: Future> Future for AssertSend<F> {
 }
 
 impl HttpClient for FetchHttpClient {
-    fn get(
+    fn send(
         &self,
-        url: &str,
-        follow_redirects: bool,
-    ) -> futures::future::BoxFuture<'static, anyhow::Result<HttpResponse>> {
-        let url = url.to_string();
+        request: Request<AsyncBody>,
+    ) -> BoxFuture<'static, anyhow::Result<Response<AsyncBody>>> {
         Box::pin(AssertSend(async move {
+            let redirect_policy = request
+                .extensions()
+                .get::<RedirectPolicy>()
+                .cloned()
+                .unwrap_or_default();
+            let (parts, mut body) = request.into_parts();
+            let url = parts.uri.to_string();
             let init = web_sys::RequestInit::new();
-            init.set_method("GET");
+            init.set_method(parts.method.as_str());
+            init.set_redirect(match redirect_policy {
+                RedirectPolicy::NoFollow => web_sys::RequestRedirect::Manual,
+                RedirectPolicy::FollowAll => web_sys::RequestRedirect::Follow,
+                RedirectPolicy::FollowLimit(limit) => {
+                    anyhow::bail!(
+                        "the browser Fetch API cannot enforce a redirect limit of {limit}"
+                    );
+                }
+            });
 
-            if !follow_redirects {
-                init.set_redirect(web_sys::RequestRedirect::Manual);
+            let request_headers = web_sys::Headers::new()
+                .map_err(|error| anyhow!("failed to create fetch Headers: {error:?}"))?;
+            for (name, value) in &parts.headers {
+                let value = value
+                    .to_str()
+                    .map_err(|error| anyhow!("request header {name} is not valid text: {error}"))?;
+                request_headers
+                    .append(name.as_str(), value)
+                    .map_err(|error| {
+                        anyhow!("failed to append request header {name}: {error:?}")
+                    })?;
             }
+            init.set_headers(request_headers.as_ref());
 
-            let request = web_sys::Request::new_with_str_and_init(&url, &init)
+            let mut request_body = Vec::new();
+            body.read_to_end(&mut request_body).await?;
+            let request_body = (!request_body.is_empty()).then(|| {
+                let bytes = js_sys::Uint8Array::from(request_body.as_slice());
+                init.set_body(bytes.as_ref());
+                bytes
+            });
+
+            let web_request = web_sys::Request::new_with_str_and_init(&url, &init)
                 .map_err(|error| anyhow!("failed to create fetch Request: {error:?}"))?;
+            drop(request_body);
 
-            let promise = global_fetch(&request)
+            let promise = global_fetch(&web_request)
                 .map_err(|error| anyhow!("fetch threw an error: {error:?}"))?;
             let response_value = wasm_bindgen_futures::JsFuture::from(promise)
                 .await
@@ -78,6 +112,36 @@ impl HttpClient for FetchHttpClient {
 
             let status_code = http::StatusCode::from_u16(web_response.status())
                 .map_err(|_| anyhow!("invalid status code"))?;
+            let mut response = Response::builder().status(status_code);
+            let response_headers = response
+                .headers_mut()
+                .ok_or_else(|| anyhow!("failed to initialize response headers"))?;
+            let entries = web_response.headers().entries();
+            loop {
+                let next = entries
+                    .next()
+                    .map_err(|error| anyhow!("failed to read response headers: {error:?}"))?;
+                if next.done() {
+                    break;
+                }
+                let entry: js_sys::Array = next
+                    .value()
+                    .dyn_into()
+                    .map_err(|error| anyhow!("response header entry is not an array: {error:?}"))?;
+                let name = entry
+                    .get(0)
+                    .as_string()
+                    .ok_or_else(|| anyhow!("response header name is not a string"))?;
+                let value = entry
+                    .get(1)
+                    .as_string()
+                    .ok_or_else(|| anyhow!("response header value is not a string"))?;
+                let name = http::header::HeaderName::from_bytes(name.as_bytes())
+                    .map_err(|error| anyhow!("invalid response header name: {error}"))?;
+                let value = http::HeaderValue::from_str(&value)
+                    .map_err(|error| anyhow!("invalid response header value: {error}"))?;
+                response_headers.append(name, value);
+            }
 
             let body_promise = web_response
                 .array_buffer()
@@ -90,10 +154,7 @@ impl HttpClient for FetchHttpClient {
                 .map_err(|error| anyhow!("response body is not an ArrayBuffer: {error:?}"))?;
             let body = js_sys::Uint8Array::new(&array_buffer).to_vec();
 
-            Ok(HttpResponse {
-                status: status_code,
-                body,
-            })
+            Ok(response.body(AsyncBody::from(body))?)
         }))
     }
 }
