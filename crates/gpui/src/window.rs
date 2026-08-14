@@ -3,11 +3,11 @@ use crate::Inspector;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasKey, AtlasTile, AvailableSpace, BackdropFilter, Background,
-    BorderStyle, Bounds, BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle,
-    Decorations, DevicePixels, DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId,
-    DynamicTexture, DynamicTextureParams, Edges, Effect, Entity, EntityId, EventEmitter,
+    BorderStyle, Bounds, BoxShadow, Capslock, ColorExt, Context, Corners, CursorHideMode,
+    CursorStyle, Decorations, DevicePixels, DispatchActionListener, DispatchNodeId, DispatchTree,
+    DisplayId, DynamicTexture, DynamicTextureParams, Edges, Effect, Entity, EntityId, EventEmitter,
     FileDropEvent, Filter, FilterBoundary, FontId, Global, GlobalElementId, GlyphId, GpuSpecs,
-    Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
+    InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke,
     KeystrokeEvent, LayoutId, Lerp, LineLayoutIndex, Modifiers, ModifiersChangedEvent,
     MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
@@ -35,6 +35,7 @@ use gpui_util::{ResultExt, measure};
 use hdrhistogram::Histogram;
 use itertools::FoldWhile::{Continue, Done};
 use itertools::Itertools;
+use palette::{Hsla, IntoColor};
 use parking_lot::RwLock;
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
 use refineable::Refineable;
@@ -4032,7 +4033,7 @@ impl Window {
                 bounds: self.cover_bounds(shadow_bounds),
                 content_mask,
                 corner_radii: corner_radii.scale(scale_factor),
-                color: shadow.color.opacity(opacity),
+                color: shadow.color.opacity(opacity).into(),
                 element_bounds,
                 element_corner_radii,
                 inset: 0,
@@ -4077,7 +4078,7 @@ impl Window {
                 bounds: self.cover_bounds(hole),
                 content_mask,
                 corner_radii: hole_corner_radii.scale(scale_factor),
-                color: shadow.color.opacity(opacity),
+                color: shadow.color.opacity(opacity).into(),
                 element_bounds,
                 element_corner_radii,
                 inset: 1,
@@ -4198,7 +4199,7 @@ impl Window {
             bounds: snapped_bounds,
             content_mask: self.snapped_content_mask(),
             background: quad.background.opacity(opacity),
-            border_color: quad.border_color.opacity(opacity),
+            border_color: quad.border_color.opacity(opacity).into(),
             corner_radii: quad.corner_radii.scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
@@ -4320,7 +4321,11 @@ impl Window {
             pad: 0,
             bounds,
             content_mask: self.snapped_content_mask(),
-            color: style.color.unwrap_or_default().opacity(element_opacity),
+            color: style
+                .color
+                .unwrap_or_default()
+                .opacity(element_opacity)
+                .into(),
             thickness,
             wavy: style.wavy.into(),
         });
@@ -4351,7 +4356,7 @@ impl Window {
             bounds,
             content_mask: self.snapped_content_mask(),
             thickness: self.snap_stroke(style.thickness),
-            color: style.color.unwrap_or_default().opacity(opacity),
+            color: style.color.unwrap_or_default().opacity(opacity).into(),
             wavy: false.into(),
         });
     }
@@ -4423,7 +4428,7 @@ impl Window {
                     pad: 0,
                     bounds,
                     content_mask,
-                    color: color.opacity(element_opacity),
+                    color: color.opacity(element_opacity).into(),
                     tile,
                     transformation: TransformationMatrix::unit(),
                 });
@@ -4433,7 +4438,7 @@ impl Window {
                     pad: 0,
                     bounds,
                     content_mask,
-                    color: color.opacity(element_opacity),
+                    color: color.opacity(element_opacity).into(),
                     tile,
                     transformation: TransformationMatrix::unit(),
                 });
@@ -4580,7 +4585,7 @@ impl Window {
             pad: 0,
             bounds: final_bounds,
             content_mask,
-            color: color.opacity(element_opacity),
+            color: color.opacity(element_opacity).into(),
             tile,
             transformation,
         });
@@ -7021,9 +7026,9 @@ impl PaintQuad {
     }
 
     /// Sets the border color of the quad.
-    pub fn border_color(self, border_color: impl Into<Hsla>) -> Self {
+    pub fn border_color(self, border_color: impl IntoColor<Hsla>) -> Self {
         PaintQuad {
-            border_color: border_color.into(),
+            border_color: border_color.into_color(),
             ..self
         }
     }
@@ -7043,7 +7048,7 @@ pub fn quad(
     corner_radii: impl Into<Corners<Pixels>>,
     background: impl Into<Background>,
     border_widths: impl Into<Edges<Pixels>>,
-    border_color: impl Into<Hsla>,
+    border_color: impl IntoColor<Hsla>,
     border_style: BorderStyle,
 ) -> PaintQuad {
     PaintQuad {
@@ -7051,7 +7056,7 @@ pub fn quad(
         corner_radii: corner_radii.into(),
         background: background.into(),
         border_widths: border_widths.into(),
-        border_color: border_color.into(),
+        border_color: border_color.into_color(),
         border_style,
     }
 }
@@ -7071,7 +7076,7 @@ pub fn fill(bounds: impl Into<Bounds<Pixels>>, background: impl Into<Background>
 /// Creates a rectangle outline with the given bounds, border color, and a 1px border width
 pub fn outline(
     bounds: impl Into<Bounds<Pixels>>,
-    border_color: impl Into<Hsla>,
+    border_color: impl IntoColor<Hsla>,
     border_style: BorderStyle,
 ) -> PaintQuad {
     PaintQuad {
@@ -7079,7 +7084,7 @@ pub fn outline(
         corner_radii: (0.).into(),
         background: transparent_black().into(),
         border_widths: (1.).into(),
-        border_color: border_color.into(),
+        border_color: border_color.into_color(),
         border_style,
     }
 }

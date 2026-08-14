@@ -38,10 +38,10 @@ use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
     DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, DynamicTextureParams, Edges,
     ExternalDragPayload, Font, FontId, FontMetrics, FontRun, ForegroundExecutor, GlyphId, GpuSpecs,
-    Hsla, ImageSource, Keymap, LineLayout, Pixels, PlatformGestures, PlatformInput, Point,
-    Priority, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Scene,
-    ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, Window,
-    WindowControlArea, hash, point, px, size,
+    ImageSource, Keymap, LineLayout, Pixels, PlatformGestures, PlatformInput, Point, Priority,
+    RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Scene, ShapedGlyph,
+    ShapedRun, SharedString, Size, SvgRenderer, SystemWindowTab, Task, Window, WindowControlArea,
+    hash, point, px, size,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use anyhow::bail;
@@ -1132,7 +1132,7 @@ pub trait PlatformTextSystem: Send + Sync {
     fn recommended_rendering_mode(&self, _font_id: FontId, _font_size: Pixels)
     -> TextRenderingMode;
     /// Returns the dilation level to use for a glyph painted in the given color.
-    fn glyph_dilation_for_color(&self, _color: Hsla) -> u8 {
+    fn glyph_dilation_for_color(&self, _color: palette::Hsla) -> u8 {
         0
     }
 }
