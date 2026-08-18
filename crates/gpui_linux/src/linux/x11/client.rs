@@ -384,11 +384,18 @@ impl X11Client {
         let compositor_present = check_compositor_present(&xcb_connection, root);
         let gtk_frame_extents_supported =
             check_gtk_frame_extents_supported(&xcb_connection, &atoms, root);
-        let client_side_decorations_supported = compositor_present && gtk_frame_extents_supported;
+        // `_GTK_FRAME_EXTENTS` is an optional WM hint. Some compositors, including
+        // Deepin's X11 window manager, do not advertise it in `_NET_SUPPORTED`
+        // while still supporting client-side decorations. Requiring that hint
+        // here incorrectly changes an explicitly requested client-decorated
+        // window into a server-decorated one, which results in two title bars
+        // when the application draws its own controls.
+        let client_side_decorations_supported = compositor_present;
         log::info!(
-            "x11: compositor present: {}, gtk_frame_extents_supported: {}",
+            "x11: compositor present: {}, gtk_frame_extents_supported: {}, client-side decorations: {}",
             compositor_present,
-            gtk_frame_extents_supported
+            gtk_frame_extents_supported,
+            client_side_decorations_supported,
         );
 
         let xkb = get_reply(
