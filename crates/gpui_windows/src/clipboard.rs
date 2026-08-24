@@ -1,4 +1,5 @@
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use collections::FxHashMap;
@@ -36,6 +37,14 @@ static CLIPBOARD_PNG_FORMAT: LazyLock<u32> =
     LazyLock::new(|| register_clipboard_format(windows::core::w!("PNG")));
 static CLIPBOARD_JPG_FORMAT: LazyLock<u32> =
     LazyLock::new(|| register_clipboard_format(windows::core::w!("JFIF")));
+
+// The name-like formats (FileGroupDescriptorW, CanIncludeInClipboardHistory,
+// ...) that remote-desktop sessions expose on the clipboard are enumerated on
+// every read. Keep the "unsupported format" diagnostics at a debug level and
+// rate-limited so a file transfer cannot flood the logs several times a second.
+static LAST_UNSUPPORTED_FORMATS_LOG_AT: LazyLock<Mutex<Option<Instant>>> =
+    LazyLock::new(|| Mutex::new(None));
+static UNSUPPORTED_FORMATS_LOG_INTERVAL: Duration = Duration::from_secs(1);
 
 static IMAGE_FORMATS_MAP: LazyLock<FxHashMap<u32, ImageFormat>> = LazyLock::new(|| {
     let mut map = FxHashMap::default();
@@ -304,6 +313,16 @@ fn convert_dib_to_bmp(dib: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn log_unsupported_clipboard_formats() {
+    {
+        let last = LAST_UNSUPPORTED_FORMATS_LOG_AT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last.is_some_and(|previous| previous.elapsed() < UNSUPPORTED_FORMATS_LOG_INTERVAL) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+
     let count = unsafe { CountClipboardFormats() };
     let mut format = 0;
     for _ in 0..count {
@@ -311,7 +330,7 @@ fn log_unsupported_clipboard_formats() {
         let mut buffer = [0u16; 64];
         unsafe { GetClipboardFormatNameW(format, &mut buffer) };
         let format_name = String::from_utf16_lossy(&buffer);
-        log::warn!(
+        log::debug!(
             "Try to paste with unsupported clipboard format: {}, {}.",
             format,
             format_name
