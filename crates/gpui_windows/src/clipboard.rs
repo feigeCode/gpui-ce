@@ -314,7 +314,7 @@ fn convert_dib_to_bmp(dib: &[u8]) -> Option<Vec<u8>> {
 
 fn log_unsupported_clipboard_formats() {
     {
-        let last = LAST_UNSUPPORTED_FORMATS_LOG_AT
+        let mut last = LAST_UNSUPPORTED_FORMATS_LOG_AT
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if last.is_some_and(|previous| previous.elapsed() < UNSUPPORTED_FORMATS_LOG_INTERVAL) {
