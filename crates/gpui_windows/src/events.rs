@@ -33,6 +33,24 @@ pub(crate) const WM_GPUI_KEYDOWN: u32 = WM_USER + 8;
 
 const SIZE_MOVE_LOOP_TIMER_ID: usize = 1;
 
+fn save_request_frame_on_minimize<T>(saved: &Cell<Option<T>>, current: &Cell<Option<T>>) {
+    let saved_callback = saved.take();
+    let current_callback = current.take();
+    saved.set(saved_callback.or(current_callback));
+}
+
+fn restore_request_frame_after_minimize<T>(
+    saved: &Cell<Option<T>>,
+    current: &Cell<Option<T>>,
+) -> bool {
+    if let Some(callback) = saved.take() {
+        current.set(Some(callback));
+        false
+    } else {
+        true
+    }
+}
+
 /// Coordinates window draws on the UI thread. Owned by the platform and
 /// shared with every window (like `WindowsPlatformState::cursor_visible`),
 /// because the coordination is inherently cross-window: while window A is
@@ -225,9 +243,10 @@ impl WindowsWindowInner {
         // Don't resize the renderer when the window is minimized, but record that it was minimized so
         // that on restore the swap chain can be recreated via `update_drawable_size_even_if_unchanged`.
         if wparam.0 == SIZE_MINIMIZED as usize {
-            self.state
-                .restore_from_minimized
-                .set(self.state.callbacks.request_frame.take());
+            save_request_frame_on_minimize(
+                &self.state.restore_from_minimized,
+                &self.state.callbacks.request_frame,
+            );
             return Some(0);
         }
 
@@ -236,15 +255,10 @@ impl WindowsWindowInner {
         let new_size = size(DevicePixels(width), DevicePixels(height));
 
         let scale_factor = self.state.scale_factor.get();
-        let mut should_resize_renderer = false;
-        if let Some(restore_from_minimized) = self.state.restore_from_minimized.take() {
-            self.state
-                .callbacks
-                .request_frame
-                .set(Some(restore_from_minimized));
-        } else {
-            should_resize_renderer = true;
-        }
+        let should_resize_renderer = restore_request_frame_after_minimize(
+            &self.state.restore_from_minimized,
+            &self.state.callbacks.request_frame,
+        );
 
         self.handle_size_change(new_size, scale_factor, should_resize_renderer);
         Some(0)
@@ -1787,5 +1801,42 @@ fn notify_frame_changed(handle: HWND) {
                 | SWP_NOZORDER,
         )
         .log_err();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::{restore_request_frame_after_minimize, save_request_frame_on_minimize};
+
+    #[test]
+    fn repeated_minimize_restore_cycles_preserve_the_callback() {
+        let saved = Cell::new(None);
+        let current = Cell::new(Some(1));
+
+        save_request_frame_on_minimize(&saved, &current);
+        save_request_frame_on_minimize(&saved, &current);
+        assert_eq!(saved.get(), Some(1));
+        assert_eq!(current.get(), None);
+
+        assert!(!restore_request_frame_after_minimize(&saved, &current));
+        assert_eq!(saved.get(), None);
+        assert_eq!(current.get(), Some(1));
+
+        save_request_frame_on_minimize(&saved, &current);
+        assert_eq!(saved.get(), Some(1));
+        assert_eq!(current.get(), None);
+        assert!(!restore_request_frame_after_minimize(&saved, &current));
+        assert_eq!(current.get(), Some(1));
+    }
+
+    #[test]
+    fn ordinary_resize_still_resizes_the_renderer() {
+        let saved = Cell::<Option<i32>>::new(None);
+        let current = Cell::new(Some(1));
+
+        assert!(restore_request_frame_after_minimize(&saved, &current));
+        assert_eq!(current.get(), Some(1));
     }
 }
