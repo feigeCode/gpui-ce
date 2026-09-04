@@ -57,7 +57,7 @@ build-windows:
 [group('build')]
 build-examples:
     @echo "📐 Building examples..."
-    cargo build --package gpui_ce --examples
+    cargo build --package gpui-ce --examples
 
 [doc('Check WASM target (stable) — requires wasm32-unknown-unknown target to be installed')]
 [group('build')]
@@ -82,7 +82,7 @@ check-wasm-atomics:
 [group('build')]
 check-examples:
     @echo "📐 Checking examples..."
-    cargo build --package gpui_ce --examples
+    cargo build --package gpui-ce --examples
     cargo check --package gpui_ce_web --target wasm32-unknown-unknown
 
 
@@ -228,7 +228,7 @@ ci:
             skip "WASM atomics" "rustup not installed (required for +nightly)"
         })
         (run-check "check examples" {
-            cargo build --package gpui_ce --examples
+            cargo build --package gpui-ce --examples
             cargo check --package gpui_ce_web --target wasm32-unknown-unknown
         })
         (if (available "typos") { run-check "typos" { typos } } else { skip "typos" "not installed" })
@@ -433,15 +433,6 @@ publish dry="false":
 
         "crates/gpui_platform/Cargo.toml"
 
-        # GPUI CE Components. These are a nested workspace because its
-        # examples and web demo have their own resolver and lockfile.
-        "crates/gpui_ce_components/crates/macros/Cargo.toml"
-        "crates/gpui_ce_components/crates/assets/Cargo.toml"
-        "crates/gpui_ce_components/crates/base/Cargo.toml"
-        "crates/gpui_ce_components/crates/fps/Cargo.toml"
-        "crates/gpui_ce_components/crates/shell/Cargo.toml"
-        "crates/gpui_ce_components/crates/ui/Cargo.toml"
-        "crates/gpui_ce_components/crates/webview/Cargo.toml"
     ]
 
     let dry_flag = if $dry_run { ["--dry-run"] } else { [] }
@@ -454,30 +445,57 @@ publish dry="false":
     # validates the complete local release graph rather than stale registry
     # versions. The patches are passed only to the dry run and are never part
     # of the published manifests.
-    let root_crates = $crates | where { |manifest| not ($manifest | str starts-with "crates/gpui_ce_components/") }
-
     for manifest in $crates {
         let name = ($manifest | path dirname | path basename)
-        print $"\n📦 Publishing ($name)..."
-        let patch_manifests = if ($manifest | str starts-with "crates/gpui_ce_components/") {
-            $crates
+        let metadata = (^cargo metadata --no-deps --format-version 1 --manifest-path $manifest | from json)
+        let manifest_path = ($manifest | path expand)
+        let package = ($metadata.packages | where manifest_path == $manifest_path | first)
+        let package_name = ($package | get name)
+        let package_version = ($package | get version)
+
+        # crates.io versions are immutable. A version-bump PR usually changes
+        # only the affected crates, so leave already-published packages alone
+        # instead of making a later stable release fail at the first one.
+        let already_published = if $dry_run {
+            false
         } else {
-            $root_crates
+            let response = (^curl
+                --retry 3
+                --retry-all-errors
+                --silent
+                --show-error
+                --user-agent "gpui-ce release workflow"
+                --output /dev/null
+                --write-out "%{http_code}"
+                $"https://crates.io/api/v1/crates/($package_name)/($package_version)"
+                | complete)
+            let status = ($response.stdout | str trim)
+            if $response.exit_code != 0 or ($status != "200" and $status != "404") {
+                error make {msg: $"Could not check crates.io for ($package_name) ($package_version): ($response.stderr) (HTTP ($status))"}
+            }
+            $status == "200"
         }
+        if $already_published {
+            print $"\n⏭️  Skipping ($name): ($package_name) ($package_version) is already on crates.io."
+            continue
+        }
+
+        print $"\n📦 Publishing ($name)..."
+        let patch_manifests = $crates
         let patch_flags = if $dry_run {
             $patch_manifests
                 | each { |patch_manifest|
-                    let metadata = (^cargo metadata --no-deps --format-version 1 --manifest-path $patch_manifest | from json)
-                    let manifest_path = ($patch_manifest | path expand)
-                    let package = ($metadata.packages | where manifest_path == $manifest_path | first | get name)
-                    ["--config" $"patch.crates-io.($package).path=\"($patch_manifest | path dirname | path expand)\""]
+                    let patch_metadata = (^cargo metadata --no-deps --format-version 1 --manifest-path $patch_manifest | from json)
+                    let patch_manifest_path = ($patch_manifest | path expand)
+                    let patch_package = ($patch_metadata.packages | where manifest_path == $patch_manifest_path | first | get name)
+                    ["--config" $"patch.crates-io.($patch_package).path=\"($patch_manifest | path dirname | path expand)\""]
                 }
                 | flatten
         } else {
             []
         }
-        # `gpui_ce` has test/example-only edges to `gpui_platform`, while the
-        # Windows platform implementation has the reciprocal `gpui_ce` edge.
+        # `gpui-ce` has test/example-only edges to `gpui_ce_platform`, while the
+        # Windows platform implementation has the reciprocal `gpui-ce` edge.
         # Cargo cannot represent the packaged crate and that local cycle in a
         # single verification lockfile. The release CI builds every target in
         # the workspace before this recipe; package the archive here and leave
@@ -497,7 +515,7 @@ publish dry="false":
 sync-upstream *args:
     @python3 {{ project_root }}/scripts/sync-upstream/sync_upstream.py sync {{ args }}
 
-[doc('One-time: record the upstream baseline to sync from (defaults to the pinned zed dep rev)')]
+[doc('One-time: record the upstream baseline to sync from (pass the upstream SHA explicitly)')]
 [group('sync')]
 sync-upstream-bootstrap *args:
     @python3 {{ project_root }}/scripts/sync-upstream/sync_upstream.py bootstrap {{ args }}
