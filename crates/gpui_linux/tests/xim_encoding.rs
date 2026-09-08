@@ -1,0 +1,11 @@
+#[test]
+fn decodes_gb2312_compound_text_from_fcitx() {
+    let compound_text = [
+        0x1b, 0x24, 0x28, 0x41, 0x3a, 0x5c, 0x38, 0x5f, 0x50, 0x4b, 0x48, 0x4f, 0x4a, 0x36, 0x44,
+        0x63,
+    ];
+
+    let decoded = xim_ctext::compound_text_to_utf8(&compound_text).unwrap();
+
+    assert_eq!("很高兴认识你", decoded);
+}
