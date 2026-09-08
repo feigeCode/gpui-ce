@@ -2,7 +2,7 @@
 
 use crate::pasteboard::NSFilenamesPboardType;
 use crate::{
-    BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
+    BoolExt, MacDisplay, NS_NOT_FOUND, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
     kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
     ns_string, renderer,
@@ -72,7 +72,6 @@ type id = *mut Object;
 const nil: id = ptr::null_mut();
 type NSInteger = isize;
 type NSUInteger = usize;
-const NSNotFound: NSUInteger = NSUInteger::MAX;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
@@ -3663,7 +3662,7 @@ extern "C" fn character_index_for_point(this: &Object, _: Sel, position: NSPoint
     })
     .flatten()
     .map(|index| index as u64)
-    .unwrap_or(NSNotFound as u64)
+    .unwrap_or(NS_NOT_FOUND as u64)
 }
 
 fn screen_point_to_gpui_point(this: &Object, position: NSPoint) -> Point<Pixels> {

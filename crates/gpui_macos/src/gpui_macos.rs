@@ -47,7 +47,9 @@ use std::{
 
 pub(crate) type Id = *mut Object;
 pub(crate) type NSUInteger = usize;
-pub(crate) const NS_NOT_FOUND: NSUInteger = NSUInteger::MAX;
+// Foundation uses NSIntegerMax, not NSUIntegerMax. A mismatched sentinel turns
+// an unspecified IME replacement range into an explicit out-of-bounds range.
+pub(crate) const NS_NOT_FOUND: NSUInteger = objc2_foundation::NSNotFound as NSUInteger;
 
 pub(crate) use dispatcher::*;
 pub(crate) use display::*;
@@ -146,5 +148,38 @@ unsafe fn ns_string(string: &str) -> Id {
         let value: Id =
             msg_send![value, initWithBytes: string.as_ptr() length: string.len() encoding: 4usize];
         msg_send![value, autorelease]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ns_range_from_appkit_not_found_is_none() {
+        // Use Foundation's sentinel, not our own constant: a self-round-trip
+        // would not catch a mismatch at the NSTextInputClient boundary.
+        let range = NSRange {
+            location: objc2_foundation::NSNotFound as NSUInteger,
+            length: 0,
+        };
+        assert!(!range.is_valid());
+        assert_eq!(range.to_range(), None);
+    }
+
+    #[test]
+    fn ns_range_invalid_uses_foundation_not_found() {
+        let range = NSRange::invalid();
+        assert_eq!(range.location, objc2_foundation::NSNotFound as NSUInteger);
+        assert_eq!(range.length, 0);
+        assert_eq!(range.to_range(), None);
+    }
+
+    #[test]
+    fn ns_range_preserves_explicit_replacement_ranges() {
+        // A zero-length range is an explicit insertion point, not NSNotFound.
+        assert_eq!(NSRange::from(0..0).to_range(), Some(0..0));
+        assert_eq!(NSRange::from(7..7).to_range(), Some(7..7));
+        assert_eq!(NSRange::from(7..9).to_range(), Some(7..9));
     }
 }
