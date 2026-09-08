@@ -3893,7 +3893,9 @@ unsafe fn remove_layer_background(layer: id) {
         let _: () = msg_send![layer, setBackgroundColor:nil];
 
         let class_name: id = msg_send![layer, className];
-        if class_name.isEqualToString("CAChameleonLayer") {
+        // `objc`'s BOOL is c_schar on x86_64, so compare with YES instead of
+        // using it directly as a bool.
+        if class_name.isEqualToString("CAChameleonLayer") == YES {
             // Remove the desktop tinting effect.
             let _: () = msg_send![layer, setHidden: YES];
             return;
